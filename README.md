@@ -3,39 +3,35 @@
 Automated Python scripts to buy Bitcoin daily and withdraw it to a hardware wallet monthly.
 
 ## Features
-* **buy_bitcoin.py**: Buys a set amount of BTC daily using the Kraken API. Calculates balances in EUR, BTC, and NOK, and sends a Telegram status update.
-* **transfer_bitcoin_to_ledger.py**: Withdraws accumulated BTC to a whitelisted Ledger address on Kraken.
-* **Telegram Alerts**: Sends execution summaries, errors, and account balances via a Telegram bot.
+* **buy_bitcoin.py**: Buys a set amount of BTC daily using Kraken API.
+* **transfer_bitcoin_to_ledger.py**: Withdraws BTC to a whitelisted Ledger address monthly.
+* **uv**: Modern, blazing-fast Python package management.
+* **systemd**: Robust, automated task scheduling and logging.
 
-## Setup
+## Local Setup (Laptop)
 
-1. **Clone the repository:**
-   git clone git@github.com:mgdfp/crypto_bot.git
+1. **Install uv:**
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+2. **Initialize:**
    cd crypto_bot
-
-2. **Set up the virtual environment:**
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install krakenex requests python-dotenv
+   uv sync
 
 3. **Configure Secrets:**
-   Create a `.env` file in the root directory and add your API keys:
-   KRAKEN_API_KEY=your_api_key
-   KRAKEN_API_SECRET=your_api_secret
-   TELEGRAM_BOT_TOKEN=your_bot_token
-   TELEGRAM_CHAT_ID=your_chat_id
+   Create a `.env` file with `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`.
 
-   Secure this file by running `chmod 600 .env`.
+## Server Setup (VM)
 
-4. **Create the log folder:**
-   mkdir logs
+1. **Service Location:**
+   Systemd files are located in `~/.config/systemd/user/`.
 
-## Automation (Cron)
-Add to your crontab (`crontab -e`):
+2. **Activate:**
+   systemctl --user daemon-reload
+   systemctl --user enable --now buy_bitcoin.timer
+   systemctl --user enable --now withdraw_bitcoin.timer
+   sudo loginctl enable-linger $USER
 
-# Buy Bitcoin daily at 12:00 PM
-0 12 * * * cd /home/username/src/crypto_bot && /home/username/src/crypto_bot/.venv/bin/python3 buy_bitcoin.py >> /home/username/src/crypto_bot/logs/btc_log.txt 2>&1
-
-# Withdraw to Ledger on the 1st of every month at 12:05 PM
-5 12 1 * * cd /home/username/src/crypto_bot && /home/username/src/crypto_bot/.venv/bin/python3 transfer_bitcoin_to_ledger.py >> /home/username/src/crypto_bot/logs/withdraw_log.txt 2>&1
-
+## Monitoring
+* **View Timers:** systemctl --user list-timers
+* **View Logs:** journalctl --user -u buy_bitcoin.service -f
+* **Manual Run:** systemctl --user start buy_bitcoin.service
