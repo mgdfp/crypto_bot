@@ -21,7 +21,10 @@ url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 
 # Setup logging
-log_file = "/home/morgan/src/crypto_bot/logs/btc_log.txt"
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, "btc_log.txt")
+
 logger = logging.getLogger("MyLogger")
 logger.setLevel(logging.INFO)
 
@@ -29,7 +32,7 @@ logger.setLevel(logging.INFO)
 handler = RotatingFileHandler(
     log_file,
     maxBytes=1_000_000,  # 1 MB
-    backupCount=5
+    backupCount=5,
 )
 formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
@@ -38,15 +41,17 @@ logger.addHandler(handler)
 # Your daily BTC buy amount in EUR
 DAILY_BUY_EUR = 15
 
+
 # Function to get the current BTC price in EUR
 def get_btc_price():
-    ticker = kraken.query_public('Ticker', {'pair': 'XXBTZEUR'})
-    if 'error' in ticker and ticker['error']:
-        logger.error("Error fetching BTC price: %s", ticker['error'])
+    ticker = kraken.query_public("Ticker", {"pair": "XXBTZEUR"})
+    if "error" in ticker and ticker["error"]:
+        logger.error("Error fetching BTC price: %s", ticker["error"])
         return None
-    price = float(ticker['result']['XXBTZEUR']['a'][0])  # Ask price
+    price = float(ticker["result"]["XXBTZEUR"]["a"][0])  # Ask price
     logger.info("Current BTC price: %.2f EUR/BTC", price)
     return price
+
 
 # Function to buy Bitcoin for a given amount in EUR
 def buy_bitcoin(amount_eur):
@@ -56,27 +61,36 @@ def buy_bitcoin(amount_eur):
         return
 
     btc_amount = amount_eur / btc_price  # Convert EUR to BTC
-    logger.info("Attempting to buy %.8f BTC at %.2f EUR/BTC for %.2f EUR", btc_amount, btc_price, amount_eur)
+    logger.info(
+        "Attempting to buy %.8f BTC at %.2f EUR/BTC for %.2f EUR",
+        btc_amount,
+        btc_price,
+        amount_eur,
+    )
 
     try:
-        order = kraken.query_private('AddOrder', {
-            'pair': 'XXBTZEUR',
-            'type': 'buy',
-            'ordertype': 'market',
-            'volume': str(btc_amount),
-        })
-        if 'error' in order and order['error']:
-            logger.error("Kraken API Error: %s", order['error'])
+        order = kraken.query_private(
+            "AddOrder",
+            {
+                "pair": "XXBTZEUR",
+                "type": "buy",
+                "ordertype": "market",
+                "volume": str(btc_amount),
+            },
+        )
+        if "error" in order and order["error"]:
+            logger.error("Kraken API Error: %s", order["error"])
             # Send Telegram Message
-            message = ("BTC Purchase FAILED")
+            message = "BTC Purchase FAILED"
             response = requests.post(url, data={"chat_id": CHAT_ID, "text": message})
         else:
             logger.info("BTC Purchase Successful: %s", order)
             # Send Telegram Message
-            message = ("BTC Purchase Successful")
+            message = "BTC Purchase Successful"
             response = requests.post(url, data={"chat_id": CHAT_ID, "text": message})
     except Exception as e:
         logger.error("Exception occurred: %s", str(e))
+
 
 def fetch_exchange_rates():
     """
@@ -96,12 +110,12 @@ def fetch_exchange_rates():
         nok_per_eur = 1 / eur_rate  # Convert to NOK per EUR
 
         # Fetch BTC price in EUR from Kraken API
-        ticker = kraken.query_public('Ticker', {'pair': 'XXBTZEUR'})
-        if 'error' in ticker and ticker['error']:
-            logger.error("Error fetching BTC price: %s", ticker['error'])
+        ticker = kraken.query_public("Ticker", {"pair": "XXBTZEUR"})
+        if "error" in ticker and ticker["error"]:
+            logger.error("Error fetching BTC price: %s", ticker["error"])
             return nok_per_eur, None
 
-        btc_price_eur = float(ticker['result']['XXBTZEUR']['a'][0])
+        btc_price_eur = float(ticker["result"]["XXBTZEUR"]["a"][0])
         btc_price_nok = btc_price_eur * nok_per_eur  # Convert BTC price to NOK
 
         return nok_per_eur, btc_price_nok
@@ -120,15 +134,14 @@ def fetch_kraken_balance():
     Returns:
         tuple: (eur_balance, btc_balance) if successful, otherwise (None, None)
     """
-    balance = kraken.query_private('Balance')
-    if 'error' in balance and balance['error']:
-        logger.error("Error fetching Kraken balance: %s", balance['error'])
+    balance = kraken.query_private("Balance")
+    if "error" in balance and balance["error"]:
+        logger.error("Error fetching Kraken balance: %s", balance["error"])
         return None, None
 
-    eur_balance = float(balance['result'].get('ZEUR', 0))
-    btc_balance = float(balance['result'].get('XXBT', 0))
+    eur_balance = float(balance["result"].get("ZEUR", 0))
+    btc_balance = float(balance["result"].get("XXBT", 0))
     return eur_balance, btc_balance
-
 
 
 def print_account_status():
@@ -164,14 +177,17 @@ def print_account_status():
         "Kraken BTC Balance: {:.8f} BTC ({:.2f} NOK)\n"
         "Daily BTC purchase: {:.2f} EUR ({:.2f} NOK)\n"
         "Kraken EUR Balance will be empty in: {:.1f} days."
-    ).format(eur_balance, eur_balance_nok, 
-             btc_balance, btc_balance_nok, 
-             DAILY_BUY_EUR, daily_buy_nok, 
-             days_left)
+    ).format(
+        eur_balance,
+        eur_balance_nok,
+        btc_balance,
+        btc_balance_nok,
+        DAILY_BUY_EUR,
+        daily_buy_nok,
+        days_left,
+    )
     # Send message
     response = requests.post(url, data={"chat_id": CHAT_ID, "text": message})
-
-
 
 
 if __name__ == "__main__":
