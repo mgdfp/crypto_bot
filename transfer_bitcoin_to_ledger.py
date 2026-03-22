@@ -151,5 +151,5 @@ def withdraw_to_ledger():
         logger.error("Exception occurred: %s", str(e))
 
 
-# Run the withdrawal process
-withdraw_to_ledger()
+if __name__ == "__main__":
+    withdraw_to_ledger()
