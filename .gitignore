@@ -11,3 +11,4 @@ logs/
 # Python Standard
 __pycache__/
 *.py[cod]
+state.json
