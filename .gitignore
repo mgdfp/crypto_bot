@@ -8,6 +8,9 @@
 logs/
 *.log
 
+# DCA runtime state (local only)
+dca_state.json
+
 # Python Standard
 __pycache__/
 *.py[cod]
