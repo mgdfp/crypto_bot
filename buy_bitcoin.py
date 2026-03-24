@@ -65,7 +65,11 @@ def save_dca_state(state):
     """Persist DCA state to disk."""
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
-    logger.info("DCA state saved: pot=%.2f EUR, deferred_days=%d", state["pot_eur"], state["deferred_days"])
+    logger.info(
+        "DCA state saved: pot=%.2f EUR, deferred_days=%d",
+        state["pot_eur"],
+        state["deferred_days"],
+    )
 
 
 def get_14day_ma():
@@ -99,9 +103,19 @@ def get_btc_price():
     return price
 
 
-def buy_bitcoin(amount_eur):
-    """Place a market buy order for the given EUR amount."""
-    btc_price = get_btc_price()
+def buy_bitcoin(amount_eur, btc_price=None):
+    """Place a market buy order for the given EUR amount.
+
+    Args:
+        amount_eur: Amount in EUR to spend.
+        btc_price: Current BTC price in EUR. If provided, skips the internal
+                   price fetch so the same price used for the buy/defer decision
+                   is also used to calculate order volume.
+    Returns:
+        True on success, False on failure.
+    """
+    if btc_price is None:
+        btc_price = get_btc_price()
     if btc_price is None:
         logger.error("Failed to retrieve BTC price. Order canceled.")
         return False
@@ -150,11 +164,16 @@ def run_smart_dca():
 
     Each day:
     - Add DAILY_BUY_EUR to the pot.
-    - If price < 14-day MA (or MA is unavailable): buy the entire pot now.
-    - If price >= 14-day MA and deferred_days < MAX_DEFER_DAYS: hold, accumulate.
-    - If deferred_days >= MAX_DEFER_DAYS: force-buy the entire pot regardless of price.
+    - If price or MA is unavailable: treat as a deferred day (counter ticks,
+      pot accumulates), notify via Telegram, and exit without buying. This
+      ensures the 7-day force-buy window cannot be silently stretched by
+      API outages.
+    - If deferred_days >= MAX_DEFER_DAYS: force-buy the entire pot regardless
+      of price (we only need the BTC price for this, not the MA).
+    - If price < 14-day MA: buy the entire pot now.
+    - Otherwise: defer, accumulate pot for tomorrow.
 
-    After a buy (voluntary or forced), reset the pot to 0 and deferred_days to 0.
+    After a successful buy (voluntary or forced), reset pot and deferred_days.
     """
     state = load_dca_state()
     state["pot_eur"] = round(state["pot_eur"] + DAILY_BUY_EUR, 2)
@@ -163,27 +182,67 @@ def run_smart_dca():
 
     logger.info(
         "Smart DCA run: pot=%.2f EUR, deferred_days=%d, today=%s",
-        pot, deferred, date.today().isoformat(),
+        pot,
+        deferred,
+        date.today().isoformat(),
     )
 
     btc_price = get_btc_price()
     ma_14d = get_14day_ma()
 
-    # Determine whether to buy
-    force_buy = deferred >= MAX_DEFER_DAYS
-    price_below_ma = (btc_price is not None and ma_14d is not None and btc_price < ma_14d)
-    ma_unavailable = btc_price is None or ma_14d is None
+    # --- Outage handling ---
+    # No BTC price: cannot buy at all. Treat as a deferred day so the 7-day
+    # force-buy guarantee cannot be stretched by API outages.
+    if btc_price is None:
+        state["deferred_days"] = deferred + 1
+        days_left = max(0, MAX_DEFER_DAYS - state["deferred_days"])
+        logger.error(
+            "BTC price unavailable — counting as deferred day %d/%d.",
+            state["deferred_days"],
+            MAX_DEFER_DAYS,
+        )
+        send_telegram(
+            f"⚠️ DCA Skipped — Price Unavailable\n"
+            f"Could not fetch BTC price from Kraken.\n"
+            f"Pot: {pot:.2f} EUR | Deferred {state['deferred_days']}/{MAX_DEFER_DAYS} days\n"
+            f"Force buy in {days_left} day(s)."
+        )
+        save_dca_state(state)
+        return
 
+    # MA unavailable on a non-force-buy day: can't compare, treat as defer.
+    # On a force-buy day we don't need the MA, so we fall through to the buy.
+    force_buy = deferred >= MAX_DEFER_DAYS
+    if ma_14d is None and not force_buy:
+        state["deferred_days"] = deferred + 1
+        days_left = max(0, MAX_DEFER_DAYS - state["deferred_days"])
+        logger.error(
+            "14-day MA unavailable — counting as deferred day %d/%d.",
+            state["deferred_days"],
+            MAX_DEFER_DAYS,
+        )
+        send_telegram(
+            f"⚠️ DCA Skipped — MA Unavailable\n"
+            f"Could not calculate 14-day moving average.\n"
+            f"BTC price: {btc_price:,.2f} EUR\n"
+            f"Pot: {pot:.2f} EUR | Deferred {state['deferred_days']}/{MAX_DEFER_DAYS} days\n"
+            f"Force buy in {days_left} day(s)."
+        )
+        save_dca_state(state)
+        return
+
+    # --- Buy / defer logic ---
     if force_buy:
-        reason = f"7-day maximum reached — force buying {pot:.2f} EUR"
-        logger.info(reason)
+        ma_str = f"{ma_14d:,.2f} EUR" if ma_14d is not None else "unavailable"
+        logger.info("Force buy triggered after %d deferred days. Buying %.2f EUR.", deferred, pot)
         send_telegram(
             f"🔴 DCA Force Buy\n"
             f"Deferred for {deferred} days — buying now regardless of price.\n"
             f"Amount: {pot:.2f} EUR\n"
-            f"BTC price: {btc_price:,.2f} EUR" if btc_price else f"Amount: {pot:.2f} EUR"
+            f"BTC price: {btc_price:,.2f} EUR\n"
+            f"14-day MA: {ma_str}"
         )
-        success = buy_bitcoin(pot)
+        success = buy_bitcoin(pot, btc_price=btc_price)
         if success:
             state["pot_eur"] = 0.0
             state["deferred_days"] = 0
@@ -191,37 +250,42 @@ def run_smart_dca():
                 f"✅ BTC Purchase Successful\n"
                 f"Bought: {pot:.2f} EUR worth of BTC\n"
                 f"BTC price: {btc_price:,.2f} EUR\n"
-                f"14-day MA: {ma_14d:,.2f} EUR"
-                if (btc_price and ma_14d) else f"✅ BTC Purchase Successful — {pot:.2f} EUR"
+                f"14-day MA: {ma_str}"
             )
 
-    elif price_below_ma or ma_unavailable:
-        if ma_unavailable:
-            logger.warning("MA/price unavailable — buying anyway as fallback.")
-        else:
-            logger.info(
-                "Price %.2f EUR < 14d MA %.2f EUR — buying %.2f EUR",
-                btc_price, ma_14d, pot,
-            )
-        success = buy_bitcoin(pot)
+    elif btc_price < ma_14d:
+        pct_below = (ma_14d - btc_price) / ma_14d * 100
+        logger.info(
+            "Price %.2f EUR is %.1f%% below 14d MA %.2f EUR — buying %.2f EUR.",
+            btc_price,
+            pct_below,
+            ma_14d,
+            pot,
+        )
+        success = buy_bitcoin(pot, btc_price=btc_price)
         if success:
             state["pot_eur"] = 0.0
             state["deferred_days"] = 0
-            msg_lines = [f"✅ BTC Purchase Successful", f"Amount: {pot:.2f} EUR"]
-            if btc_price:
-                msg_lines.append(f"BTC price: {btc_price:,.2f} EUR")
-            if ma_14d:
-                msg_lines.append(f"14-day MA: {ma_14d:,.2f} EUR")
-                msg_lines.append(f"Price was {((ma_14d - btc_price) / ma_14d * 100):.1f}% below MA 📉")
-            send_telegram("\n".join(msg_lines))
+            send_telegram(
+                f"✅ BTC Purchase Successful\n"
+                f"Amount: {pot:.2f} EUR\n"
+                f"BTC price: {btc_price:,.2f} EUR\n"
+                f"14-day MA: {ma_14d:,.2f} EUR\n"
+                f"Price was {pct_below:.1f}% below MA 📉"
+            )
 
     else:
         # Price is at or above MA — defer
         state["deferred_days"] = deferred + 1
         days_left = MAX_DEFER_DAYS - state["deferred_days"]
         logger.info(
-            "Price %.2f EUR >= 14d MA %.2f EUR — deferring. Pot: %.2f EUR, deferred_days: %d, force-buy in %d day(s).",
-            btc_price, ma_14d, pot, state["deferred_days"], days_left,
+            "Price %.2f EUR >= 14d MA %.2f EUR — deferring. "
+            "Pot: %.2f EUR, deferred_days: %d, force-buy in %d day(s).",
+            btc_price,
+            ma_14d,
+            pot,
+            state["deferred_days"],
+            days_left,
         )
         send_telegram(
             f"⏳ DCA Deferred\n"
@@ -323,7 +387,6 @@ def print_account_status():
         else ""
     )
 
-    # Send Telegram Message
     message = (
         "Kraken EUR Balance: {:.2f} EUR ({:.2f} NOK)\n"
         "Kraken BTC Balance: {:.8f} BTC ({:.2f} NOK)\n"
