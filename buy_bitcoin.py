@@ -42,6 +42,26 @@ logger.addHandler(handler)
 DAILY_BUY_EUR = 15
 
 
+def get_14day_ma():
+    """Fetch daily OHLC data and compute the 14-day simple moving average of close prices."""
+    ohlc = kraken.query_public("OHLC", {"pair": "XXBTZEUR", "interval": 1440})
+    if "error" in ohlc and ohlc["error"]:
+        logger.error("Error fetching OHLC data: %s", ohlc["error"])
+        return None
+
+    # OHLC entries: [time, open, high, low, close, vwap, volume, count]
+    candles = ohlc["result"].get("XXBTZEUR", [])
+    if len(candles) < 15:
+        logger.error("Not enough OHLC data for MA calculation (got %d candles)", len(candles))
+        return None
+
+    # Use the last 14 closed candles (exclude the current in-progress candle at the end)
+    closes = [float(c[4]) for c in candles[-15:-1]]
+    ma = sum(closes) / len(closes)
+    logger.info("14-day MA: %.2f EUR/BTC", ma)
+    return ma
+
+
 # Function to get the current BTC price in EUR
 def get_btc_price():
     ticker = kraken.query_public("Ticker", {"pair": "XXBTZEUR"})
@@ -159,6 +179,8 @@ def print_account_status():
         logger.error("Could not fetch Kraken balance.")
         return
 
+    ma_14d = get_14day_ma()
+
     # Convert balances to NOK
     eur_balance_nok = eur_balance * nok_per_eur
     btc_balance_nok = btc_balance * btc_price_nok
@@ -171,12 +193,16 @@ def print_account_status():
     logger.info("Kraken BTC Balance: %.8f BTC (%.2f NOK)", btc_balance, btc_balance_nok)
     logger.info("Daily BTC purchase: %.2f EUR (%.2f NOK)", DAILY_BUY_EUR, daily_buy_nok)
     logger.info("Kraken EUR Balance will be empty in: %.1f days.", days_left)
+
+    ma_line = f"14-day MA: {ma_14d:,.2f} EUR/BTC\n" if ma_14d is not None else ""
+
     # Send Telegram Message
     message = (
         "Kraken EUR Balance: {:.2f} EUR ({:.2f} NOK)\n"
         "Kraken BTC Balance: {:.8f} BTC ({:.2f} NOK)\n"
         "Daily BTC purchase: {:.2f} EUR ({:.2f} NOK)\n"
-        "Kraken EUR Balance will be empty in: {:.1f} days."
+        "Kraken EUR Balance will be empty in: {:.1f} days.\n"
+        "{ma_line}"
     ).format(
         eur_balance,
         eur_balance_nok,
@@ -185,6 +211,7 @@ def print_account_status():
         DAILY_BUY_EUR,
         daily_buy_nok,
         days_left,
+        ma_line=ma_line,
     )
     # Send message
     response = requests.post(url, data={"chat_id": CHAT_ID, "text": message})
