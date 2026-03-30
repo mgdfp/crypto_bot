@@ -11,6 +11,9 @@ logs/
 # DCA runtime state (local only)
 dca_state.json
 
+# Purchase log — financial data, keep off Git
+purchase_log.csv
+
 # Python Standard
 __pycache__/
 *.py[cod]

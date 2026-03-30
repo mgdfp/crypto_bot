@@ -1,10 +1,11 @@
+import csv
 import krakenex
 import logging
 from logging.handlers import RotatingFileHandler
 import requests
 import os
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -48,6 +49,63 @@ MAX_DEFER_DAYS = 7
 
 # Path to the DCA state file (tracks pot and defer streak)
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dca_state.json")
+
+# Path to the purchase log CSV (cost-basis record for Skatteetaten)
+PURCHASE_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "purchase_log.csv")
+
+_CSV_HEADERS = [
+    "timestamp_utc",
+    "btc_amount",
+    "eur_amount",
+    "btc_price_eur",
+    "nok_per_eur",
+    "btc_price_nok",
+    "cost_basis_nok",
+    "txid",
+]
+
+
+def log_purchase_to_csv(btc_amount, eur_amount, btc_price_eur, nok_per_eur, txid=""):
+    """Append a completed BTC purchase to the cost-basis CSV log.
+
+    Args:
+        btc_amount:    BTC quantity bought.
+        eur_amount:    EUR spent.
+        btc_price_eur: BTC ask price in EUR at time of order.
+        nok_per_eur:   NOK/EUR exchange rate at time of order.
+        txid:          Kraken transaction ID(s), if available.
+    """
+    btc_price_nok = btc_price_eur * nok_per_eur
+    cost_basis_nok = eur_amount * nok_per_eur
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    file_exists = os.path.exists(PURCHASE_LOG)
+    try:
+        with open(PURCHASE_LOG, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=_CSV_HEADERS)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(
+                {
+                    "timestamp_utc": timestamp,
+                    "btc_amount": f"{btc_amount:.8f}",
+                    "eur_amount": f"{eur_amount:.2f}",
+                    "btc_price_eur": f"{btc_price_eur:.2f}",
+                    "nok_per_eur": f"{nok_per_eur:.4f}",
+                    "btc_price_nok": f"{btc_price_nok:.2f}",
+                    "cost_basis_nok": f"{cost_basis_nok:.2f}",
+                    "txid": txid,
+                }
+            )
+        logger.info(
+            "Purchase logged to CSV: %.8f BTC for %.2f EUR (%.2f NOK) — txid: %s",
+            btc_amount,
+            eur_amount,
+            cost_basis_nok,
+            txid or "n/a",
+        )
+    except OSError as e:
+        logger.error("Failed to write purchase log: %s", e)
 
 
 def load_dca_state():
@@ -106,6 +164,9 @@ def get_btc_price():
 def buy_bitcoin(amount_eur, btc_price=None):
     """Place a market buy order for the given EUR amount.
 
+    On success, appends an entry to the purchase CSV log (purchase_log.csv)
+    with the cost basis in NOK for Skatteetaten reporting.
+
     Args:
         amount_eur: Amount in EUR to spend.
         btc_price: Current BTC price in EUR. If provided, skips the internal
@@ -144,6 +205,35 @@ def buy_bitcoin(amount_eur, btc_price=None):
             return False
         else:
             logger.info("BTC Purchase Successful: %s", order)
+            txid = ",".join(order.get("result", {}).get("txid", []))
+
+            # Fetch NOK/EUR rate at purchase time for cost-basis record
+            nok_per_eur, _ = fetch_exchange_rates()
+            if nok_per_eur is not None:
+                log_purchase_to_csv(
+                    btc_amount=btc_amount,
+                    eur_amount=amount_eur,
+                    btc_price_eur=btc_price,
+                    nok_per_eur=nok_per_eur,
+                    txid=txid,
+                )
+            else:
+                logger.warning(
+                    "Could not fetch NOK/EUR rate — purchase NOT logged to CSV. "
+                    "Manual entry needed: %.8f BTC for %.2f EUR (txid: %s)",
+                    btc_amount,
+                    amount_eur,
+                    txid,
+                )
+                send_telegram(
+                    f"⚠️ CSV Log Failed\n"
+                    f"Purchase was successful but the NOK/EUR rate could not be fetched.\n"
+                    f"Manual CSV entry needed:\n"
+                    f"  BTC: {btc_amount:.8f}\n"
+                    f"  EUR: {amount_eur:.2f}\n"
+                    f"  TXID: {txid}"
+                )
+
             return True
     except Exception as e:
         logger.error("Exception occurred: %s", str(e))
