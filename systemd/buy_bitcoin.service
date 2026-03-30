@@ -1,0 +1,7 @@
+[Unit]
+Description=Buy Bitcoin Daily
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/morgan/src/crypto_bot
+ExecStart=/home/morgan/.local/bin/uv run buy_bitcoin.py

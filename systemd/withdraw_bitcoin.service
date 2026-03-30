@@ -1,0 +1,7 @@
+[Unit]
+Description=Withdraw Bitcoin Monthly
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/morgan/src/crypto_bot
+ExecStart=/home/morgan/.local/bin/uv run transfer_bitcoin_to_ledger.py

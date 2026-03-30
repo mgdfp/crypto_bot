@@ -1,0 +1,7 @@
+[Unit]
+Description=Build BTC Purchase Log (Skatteetaten cost-basis CSV)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/morgan/src/crypto_bot
+ExecStart=/home/morgan/.local/bin/uv run build_purchase_log.py
