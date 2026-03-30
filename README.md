@@ -1,37 +1,102 @@
 # Kraken Crypto Auto-Bot
 
-Automated Python scripts to buy Bitcoin daily and withdraw it to a hardware wallet monthly.
+Automated Python scripts to buy Bitcoin daily, log purchases for tax reporting, and withdraw to a hardware wallet monthly.
 
 ## Features
-* **buy_bitcoin.py**: Buys a set amount of BTC daily using Kraken API.
-* **transfer_bitcoin_to_ledger.py**: Withdraws BTC to a whitelisted Ledger address monthly.
-* **uv**: Modern, blazing-fast Python package management.
-* **systemd**: Robust, automated task scheduling and logging.
+
+- **buy_bitcoin.py** — Buys a set amount of BTC daily using the Kraken API. Uses a 14-day moving average to time purchases (defers when price is above MA, force-buys after 7 deferred days).
+- **build_purchase_log.py** — Builds a `purchase_log.csv` with cost-basis data for each purchase, including fees and historical NOK/EUR exchange rates. Useful for reporting capital gains to Skatteetaten.
+- **transfer_bitcoin_to_ledger.py** — Withdraws BTC to a whitelisted Ledger address monthly.
+- **uv** — Modern, fast Python package management.
+- **systemd** — Robust task scheduling. Unit files live in `systemd/` and are symlinked into place.
 
 ## Local Setup (Laptop)
 
 1. **Install uv:**
+   ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
 
 2. **Initialize:**
+   ```bash
    cd crypto_bot
    uv sync
+   ```
 
-3. **Configure Secrets:**
-   Create a `.env` file with `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`.
+3. **Configure secrets:**
+   Copy `.env.example` to `.env` and fill in your values:
+   ```bash
+   cp .env.example .env
+   ```
 
-## Server Setup (VM)
+   Required variables:
+   - `KRAKEN_API_KEY` / `KRAKEN_API_SECRET` — full trading permissions (for `buy_bitcoin.py`)
+   - `KRAKEN_QUERY_API_KEY` / `KRAKEN_QUERY_API_SECRET` — read-only key, only needs "Query Closed Orders & Trades" permission (for `build_purchase_log.py`)
+   - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — for status and alert messages
 
-1. **Service Location:**
-   Systemd files are located in `~/.config/systemd/user/`.
+## Server Setup (VM/LXC)
 
-2. **Activate:**
+Systemd unit files are stored in `systemd/` in the repo. Symlink them into place so systemd can find them:
+
+1. **Create symlinks:**
+   ```bash
+   cd ~/.config/systemd/user
+
+   ln -s ~/src/crypto_bot/systemd/buy_bitcoin.service buy_bitcoin.service
+   ln -s ~/src/crypto_bot/systemd/buy_bitcoin.timer buy_bitcoin.timer
+   ln -s ~/src/crypto_bot/systemd/withdraw_bitcoin.service withdraw_bitcoin.service
+   ln -s ~/src/crypto_bot/systemd/withdraw_bitcoin.timer withdraw_bitcoin.timer
+   ln -s ~/src/crypto_bot/systemd/build_purchase_log.service build_purchase_log.service
+   ln -s ~/src/crypto_bot/systemd/build_purchase_log.timer build_purchase_log.timer
+   ```
+
+2. **Enable and start timers:**
+   ```bash
    systemctl --user daemon-reload
    systemctl --user enable --now buy_bitcoin.timer
    systemctl --user enable --now withdraw_bitcoin.timer
+   systemctl --user enable --now build_purchase_log.timer
    sudo loginctl enable-linger $USER
+   ```
+
+## Schedule
+
+| Script | Time |
+|---|---|
+| `buy_bitcoin.py` | Daily at 12:00 |
+| `build_purchase_log.py` | Daily at 12:15 |
+| `transfer_bitcoin_to_ledger.py` | Monthly (see timer) |
+
+## Purchase Log (Skatteetaten)
+
+`build_purchase_log.py` maintains `purchase_log.csv` — a running record of every BTC purchase with all fields needed to calculate capital gains:
+
+| Column | Description |
+|---|---|
+| `timestamp_utc` | Trade execution time |
+| `txid` | Kraken trade ID |
+| `btc_amount` | BTC received |
+| `eur_amount` | EUR spent (excl. fee) |
+| `fee_eur` | Kraken fee in EUR (tax-deductible) |
+| `total_cost_eur` | EUR spent incl. fee |
+| `btc_price_eur` | Actual executed price |
+| `nok_per_eur` | Historical NOK/EUR rate on trade date |
+| `btc_price_nok` | BTC price in NOK |
+| `cost_basis_nok` | Total acquisition cost in NOK |
+
+The CSV is gitignored (financial data). On first run, the full Kraken trade history is pulled and backfilled automatically.
 
 ## Monitoring
-* **View Timers:** systemctl --user list-timers
-* **View Logs:** journalctl --user -u buy_bitcoin.service -f
-* **Manual Run:** systemctl --user start buy_bitcoin.service
+
+```bash
+# List timers and next run times
+systemctl --user list-timers
+
+# Follow logs
+journalctl --user -u buy_bitcoin.service -f
+journalctl --user -u build_purchase_log.service -f
+
+# Manual run
+systemctl --user start buy_bitcoin.service
+systemctl --user start build_purchase_log.service
+```
