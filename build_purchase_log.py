@@ -149,7 +149,7 @@ def fetch_trades(kraken, start=None):
     offset = 0
 
     while True:
-        params = {"type": "buy", "ofs": offset}
+        params = {"ofs": offset}
         if start is not None:
             params["start"] = start
 
