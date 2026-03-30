@@ -71,7 +71,9 @@ logger.addHandler(handler)
 
 # Also log to stdout so systemd journal captures it
 stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+stream_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
 logger.addHandler(stream_handler)
 
 # ---------------------------------------------------------------------------
@@ -116,6 +118,7 @@ def append_rows(rows):
 # State (last-processed timestamp)
 # ---------------------------------------------------------------------------
 
+
 def load_state():
     """Load state. Returns {'last_trade_time': float or None}."""
     if os.path.exists(STATE_FILE):
@@ -136,6 +139,7 @@ def save_state(state):
 # ---------------------------------------------------------------------------
 # Kraken
 # ---------------------------------------------------------------------------
+
 
 def fetch_trades(kraken, start=None):
     """Fetch all BTC/EUR buy trades from Kraken, optionally from a start timestamp.
@@ -167,13 +171,17 @@ def fetch_trades(kraken, start=None):
 
         # Filter to BTC/EUR buys only
         btc_trades = {
-            txid: t for txid, t in trades.items()
+            txid: t
+            for txid, t in trades.items()
             if t.get("pair") == BTC_EUR_PAIR and t.get("type") == "buy"
         }
         all_trades.update(btc_trades)
         logger.info(
             "Fetched batch: %d trades (offset %d / count %d), %d BTC/EUR buys",
-            len(trades), offset, count, len(btc_trades),
+            len(trades),
+            offset,
+            count,
+            len(btc_trades),
         )
 
         offset += len(trades)
@@ -222,11 +230,15 @@ def get_nok_per_eur(date_str):
     # Fallback: try latest rate
     logger.warning("Falling back to latest NOK/EUR rate for %s", date_str)
     try:
-        resp = requests.get("https://api.frankfurter.app/latest?from=EUR&to=NOK", timeout=10)
+        resp = requests.get(
+            "https://api.frankfurter.app/latest?from=EUR&to=NOK", timeout=10
+        )
         data = resp.json()
         if "rates" in data and "NOK" in data["rates"]:
             rate = data["rates"]["NOK"]
-            logger.warning("Using latest NOK/EUR rate (%.4f) as fallback for %s", rate, date_str)
+            logger.warning(
+                "Using latest NOK/EUR rate (%.4f) as fallback for %s", rate, date_str
+            )
             _rate_cache[date_str] = rate
             return rate
     except Exception as e:
@@ -238,6 +250,7 @@ def get_nok_per_eur(date_str):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     if not API_KEY or not API_SECRET:
@@ -282,9 +295,9 @@ def main():
         date_str = trade_dt.strftime("%Y-%m-%d")
         timestamp_utc = trade_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        btc_amount = float(trade["vol"])       # BTC received
-        eur_amount = float(trade["cost"])      # EUR spent (excl. fee)
-        fee_eur = float(trade["fee"])          # Kraken fee in EUR
+        btc_amount = float(trade["vol"])  # BTC received
+        eur_amount = float(trade["cost"])  # EUR spent (excl. fee)
+        fee_eur = float(trade["fee"])  # Kraken fee in EUR
         total_cost_eur = eur_amount + fee_eur
         btc_price_eur = float(trade["price"])  # actual executed price
 
@@ -293,25 +306,28 @@ def main():
             logger.error(
                 "Could not get NOK/EUR rate for %s — skipping trade %s. "
                 "Re-run once rates are available.",
-                date_str, txid,
+                date_str,
+                txid,
             )
             continue
 
         btc_price_nok = btc_price_eur * nok_per_eur
         cost_basis_nok = total_cost_eur * nok_per_eur
 
-        new_rows.append({
-            "timestamp_utc": timestamp_utc,
-            "txid": txid,
-            "btc_amount": f"{btc_amount:.8f}",
-            "eur_amount": f"{eur_amount:.2f}",
-            "fee_eur": f"{fee_eur:.4f}",
-            "total_cost_eur": f"{total_cost_eur:.2f}",
-            "btc_price_eur": f"{btc_price_eur:.2f}",
-            "nok_per_eur": f"{nok_per_eur:.4f}",
-            "btc_price_nok": f"{btc_price_nok:.2f}",
-            "cost_basis_nok": f"{cost_basis_nok:.2f}",
-        })
+        new_rows.append(
+            {
+                "timestamp_utc": timestamp_utc,
+                "txid": txid,
+                "btc_amount": f"{btc_amount:.8f}",
+                "eur_amount": f"{eur_amount:.2f}",
+                "fee_eur": f"{fee_eur:.4f}",
+                "total_cost_eur": f"{total_cost_eur:.2f}",
+                "btc_price_eur": f"{btc_price_eur:.2f}",
+                "nok_per_eur": f"{nok_per_eur:.4f}",
+                "btc_price_nok": f"{btc_price_nok:.2f}",
+                "cost_basis_nok": f"{cost_basis_nok:.2f}",
+            }
+        )
 
         if latest_ts is None or trade_ts > latest_ts:
             latest_ts = trade_ts
