@@ -26,6 +26,7 @@ CSV columns:
 import csv
 import json
 import logging
+import logging.handlers
 import os
 import time
 from datetime import datetime, timezone
@@ -325,5 +326,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import logging.handlers  # ensure available at module level for logger setup
     main()
