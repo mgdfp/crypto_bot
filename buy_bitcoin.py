@@ -1,44 +1,10 @@
-import krakenex
-import logging
-from logging.handlers import RotatingFileHandler
-import requests
-import os
 import json
+import os
 from datetime import date
-from dotenv import load_dotenv
 
-load_dotenv()
+from common import kraken, send_telegram, setup_logger, fetch_exchange_rates
 
-# Kraken info
-API_KEY = os.getenv("KRAKEN_API_KEY")
-API_SECRET = os.getenv("KRAKEN_API_SECRET")
-
-# Initialize Kraken API
-kraken = krakenex.API(API_KEY, API_SECRET)
-
-# Telegram info
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-
-# Setup logging
-log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, "btc_log.txt")
-
-logger = logging.getLogger("MyLogger")
-logger.setLevel(logging.INFO)
-
-# Configure a rotating handler - up to 5 files of 1MB each
-handler = RotatingFileHandler(
-    log_file,
-    maxBytes=1_000_000,  # 1 MB
-    backupCount=5,
-)
-formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+logger = setup_logger("buy_bitcoin", "btc_log.txt")
 
 # Your daily BTC buy amount in EUR
 DAILY_BUY_EUR = 15
@@ -148,14 +114,6 @@ def buy_bitcoin(amount_eur, btc_price=None):
     except Exception as e:
         logger.error("Exception occurred: %s", str(e))
         return False
-
-
-def send_telegram(message):
-    """Send a message to the configured Telegram chat."""
-    try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": message})
-    except Exception as e:
-        logger.error("Failed to send Telegram message: %s", e)
 
 
 def run_smart_dca():
@@ -297,42 +255,6 @@ def run_smart_dca():
     save_dca_state(state)
 
 
-def fetch_exchange_rates():
-    """
-    Fetch the NOK/EUR exchange rate and calculate the NOK/BTC rate.
-    Returns:
-        tuple: (nok_per_eur, btc_price_nok) if successful, otherwise (None, None)
-    """
-    try:
-        # Fetch NOK/EUR rate from the Frankfurter API
-        response = requests.get("https://api.frankfurter.app/latest?from=NOK&to=EUR")
-        data = response.json()
-        if "rates" not in data or "EUR" not in data["rates"]:
-            logger.error("Missing expected data in exchange rate response: %s", data)
-            return None, None
-
-        eur_rate = data["rates"]["EUR"]
-        nok_per_eur = 1 / eur_rate  # Convert to NOK per EUR
-
-        # Fetch BTC price in EUR from Kraken API
-        ticker = kraken.query_public("Ticker", {"pair": "XXBTZEUR"})
-        if "error" in ticker and ticker["error"]:
-            logger.error("Error fetching BTC price: %s", ticker["error"])
-            return nok_per_eur, None
-
-        btc_price_eur = float(ticker["result"]["XXBTZEUR"]["a"][0])
-        btc_price_nok = btc_price_eur * nok_per_eur  # Convert BTC price to NOK
-
-        return nok_per_eur, btc_price_nok
-
-    except requests.exceptions.RequestException as e:
-        logger.error("Network error fetching exchange rates: %s", e)
-        return None, None
-    except Exception as e:
-        logger.error("Unexpected error fetching exchange rates: %s", e)
-        return None, None
-
-
 def fetch_kraken_balance():
     """
     Fetch the Kraken account balance in EUR and BTC.
@@ -354,7 +276,7 @@ def print_account_status():
     Log and print the account status including converted balances and
     estimated days until funds are exhausted based on daily spending.
     """
-    nok_per_eur, btc_price_nok = fetch_exchange_rates()
+    nok_per_eur, btc_price_nok = fetch_exchange_rates(logger)
     if nok_per_eur is None or btc_price_nok is None:
         logger.error("Could not fetch exchange rates. Skipping log update.")
         return
