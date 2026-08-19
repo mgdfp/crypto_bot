@@ -13,8 +13,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PURCHASE_LOG = os.path.join(BASE_DIR, "purchase_log.csv")
 DCA_STATE_FILE = os.path.join(BASE_DIR, "dca_state.json")
 
-# Keep in sync with DAILY_BUY_EUR in buy_bitcoin.py
-DAILY_BUY_EUR = 100
+RUNWAY_WINDOW_DAYS = 14  # smooths over deferred-day catch-up buys
 
 _log = logging.getLogger(__name__)
 _log.addHandler(logging.StreamHandler())
@@ -43,6 +42,22 @@ def get_kraken_eur_balance():
         _log.error("Kraken balance error: %s", resp["error"])
         return None
     return float(resp["result"].get("ZEUR", 0))
+
+
+def recent_daily_rate_eur(rows, window_days=RUNWAY_WINDOW_DAYS):
+    """Average EUR spent per day over the last window_days, from actual purchases."""
+    if not rows:
+        return None
+    cutoff = datetime.now(timezone.utc).timestamp() - window_days * 86400
+    spent = sum(
+        float(r["total_cost_eur"])
+        for r in rows
+        if datetime.strptime(r["timestamp_utc"], "%Y-%m-%d %H:%M:%S")
+        .replace(tzinfo=timezone.utc)
+        .timestamp()
+        >= cutoff
+    )
+    return spent / window_days if spent > 0 else None
 
 
 def load_dca_state():
@@ -157,8 +172,12 @@ def main():
         pot_line += f"  (deferred {deferred}/7 days)"
     print(f"    DCA pot         : {pot_line}")
     if eur_balance is not None:
-        runway = f"~{eur_balance / DAILY_BUY_EUR:.0f} days"
-        print(f"    Kraken EUR      : {eur_balance:,.2f} EUR  ({runway} runway)")
+        daily_rate = recent_daily_rate_eur(rows)
+        if daily_rate:
+            runway = f"~{eur_balance / daily_rate:.0f} days"
+            print(f"    Kraken EUR      : {eur_balance:,.2f} EUR  ({runway} runway @ {daily_rate:.2f} EUR/day avg)")
+        else:
+            print(f"    Kraken EUR      : {eur_balance:,.2f} EUR")
     print()
 
 
