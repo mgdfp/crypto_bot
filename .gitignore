@@ -14,6 +14,7 @@ dca_state.json
 # Purchase log state and CSV — financial data, keep off Git
 purchase_log_state.json
 purchase_log.csv
+trend_data.json
 
 # Python Standard
 __pycache__/

@@ -6,6 +6,8 @@ Automated Python scripts to buy Bitcoin daily, log purchases for tax reporting, 
 
 - **buy_bitcoin.py** — Buys a set amount of BTC daily using the Kraken API. Uses a 14-day moving average to time purchases (defers when price is above MA, force-buys after 7 deferred days).
 - **build_purchase_log.py** — Builds a `purchase_log.csv` with cost-basis data for each purchase, including fees and historical NOK/EUR exchange rates. Useful for reporting capital gains to Skatteetaten.
+- **portfolio_summary.py** — Prints a snapshot of the current portfolio: holdings, cost basis, live value, unrealised P/L, price targets, and bot state.
+- **portfolio_trend.py** — Compares BTC holdings over time against a hypothetical NOK savings account, DCA'd on the same schedule.
 - **transfer_bitcoin_to_ledger.py** — Withdraws BTC to a whitelisted Ledger address monthly.
 - **uv** — Modern, fast Python package management.
 - **systemd** — Robust task scheduling. Unit files live in `systemd/` and are symlinked into place.
@@ -85,6 +87,27 @@ Systemd unit files are stored in `systemd/` in the repo. Symlink them into place
 | `cost_basis_nok` | Total acquisition cost in NOK |
 
 The CSV is gitignored (financial data). On first run, the full Kraken trade history is pulled and backfilled automatically.
+
+## Portfolio Overview
+
+Both scripts read `purchase_log.csv`, so run `build_purchase_log.py` at least once first.
+
+**`portfolio_summary.py`** — a snapshot of where things stand right now: BTC held, total invested, live portfolio value, unrealised P/L, price targets for break-even/+25%/+50%/+100%, and the bot's current DCA/pot state.
+
+```bash
+uv run ./portfolio_summary.py          # both EUR and NOK
+uv run ./portfolio_summary.py --nok    # NOK only
+uv run ./portfolio_summary.py --eur    # EUR only
+```
+
+**`portfolio_trend.py`** — answers "would I have been better off in a savings account?" by comparing, at weekly points since your first purchase: cumulative NOK invested, BTC holdings' NOK value, and what those same NOK amounts would be worth had they been DCA'd into a savings account instead (default 4%/year). Writes `trend_data.json` (also gitignored) and prints it to stdout.
+
+```bash
+uv run ./portfolio_trend.py                  # default: 4% annual rate, weekly points
+uv run ./portfolio_trend.py --rate 0.05      # use a different savings rate
+uv run ./portfolio_trend.py --sample-days 1  # daily points instead of weekly
+uv run ./portfolio_trend.py --no-live        # skip the live-price "today" point
+```
 
 ## Monitoring
 
