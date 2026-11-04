@@ -7,7 +7,7 @@ from common import kraken, send_telegram, setup_logger, fetch_exchange_rates
 logger = setup_logger("buy_bitcoin", "btc_log.txt")
 
 # Your daily BTC buy amount in EUR
-DAILY_BUY_EUR = 15
+DAILY_BUY_EUR = 10
 
 # Maximum number of days to defer a buy before forcing it
 MAX_DEFER_DAYS = 7
